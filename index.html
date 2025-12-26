@@ -1,0 +1,157 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>MAX DENSITY GPU</title>
+    <style>
+        body { margin: 0; background: #000; overflow: hidden; display: flex; flex-direction: column; }
+        canvas { width: 100vw; height: 100vh; display: block; }
+        .ui { position: fixed; bottom: 20px; left: 50%; transform: translateX(-50%); display: flex; gap: 10px; z-index: 10; }
+        button { background: rgba(20,20,20,0.8); color: #fff; border: 1px solid #444; padding: 12px 20px; border-radius: 30px; font-family: monospace; font-size: 14px; backdrop-filter: blur(5px); }
+    </style>
+</head>
+<body>
+
+    <canvas id="glCanvas"></canvas>
+    
+    <div class="ui">
+        <button id="flipBtn">ROTATE</button>
+        <button id="modeBtn">FULL COLOR</button>
+    </div>
+
+    <script type="text/javascript">
+        const canvas = document.getElementById('glCanvas');
+        const gl = canvas.getContext('webgl');
+
+        let facingMode = "environment";
+        let colorMode = 0; // 0: Full, 1: Green, 2: Blue, 3: Gray
+        const modes = ["FULL COLOR", "MATRIX GREEN", "DEEP BLUE", "GRAYSCALE"];
+
+        // High Density Settings
+        const COLS = 300.0; 
+        const ROWS = 200.0;
+
+        // Vertex Shader
+        const vsSource = `
+            attribute vec4 aVertexPosition;
+            varying vec2 vTexCoord;
+            void main() {
+                gl_Position = aVertexPosition;
+                vTexCoord = (aVertexPosition.xy + 1.0) / 2.0;
+            }
+        `;
+
+        // Fragment Shader (The magic happens here)
+        const fsSource = `
+            precision mediump float;
+            varying vec2 vTexCoord;
+            uniform sampler2D uSampler;
+            uniform float uCols;
+            uniform float uRows;
+            uniform int uColorMode;
+
+            float character(float n, vec2 p) {
+                p = floor(p * vec2(4.0, -4.0) + 0.5);
+                if (clamp(p.x, 0.0, 3.0) == p.x && clamp(p.y, 0.0, 4.0) == p.y) {
+                    if (int(mod(n / pow(2.0, p.y * 4.0 + p.x), 2.0)) == 1) return 1.0;
+                }
+                return 0.0;
+            }
+
+            void main() {
+                vec2 uv = vTexCoord;
+                // Flip texture correctly for environment/user
+                vec2 grid = vec2(uCols, uRows);
+                vec2 p = floor(uv * grid) / grid;
+                vec4 col = texture2D(uSampler, vec2(p.x, 1.0 - p.y));
+                
+                float gray = dot(col.rgb, vec3(0.2126, 0.7152, 0.0722));
+                
+                // Color modes
+                vec3 finalCol;
+                if (uColorMode == 0) finalCol = col.rgb;
+                else if (uColorMode == 1) finalCol = vec3(0.0, gray, 0.0);
+                else if (uColorMode == 2) finalCol = vec3(0.0, gray * 0.5, gray);
+                else finalCol = vec3(gray);
+
+                // Simple ASCII threshold effect
+                float charMask = step(0.5, gray); 
+                gl_FragColor = vec4(finalCol * charMask, 1.0);
+            }
+        `;
+
+        // Initialize WebGL and Camera
+        let video = document.createElement('video');
+        video.autoplay = true;
+        video.playsInline = true;
+
+        async function startCamera() {
+            const stream = await navigator.mediaDevices.getUserMedia({ 
+                video: { facingMode: facingMode } 
+            });
+            video.srcObject = stream;
+            video.play();
+        }
+
+        function createShader(gl, type, source) {
+            const shader = gl.createShader(type);
+            gl.shaderSource(shader, source);
+            gl.compileShader(shader);
+            return shader;
+        }
+
+        const program = gl.createProgram();
+        gl.attachShader(program, createShader(gl, gl.VERTEX_SHADER, vsSource));
+        gl.attachShader(program, createShader(gl, gl.FRAGMENT_SHADER, fsSource));
+        gl.linkProgram(program);
+        gl.useProgram(program);
+
+        const posBuffer = gl.createBuffer();
+        gl.bindBuffer(gl.ARRAY_BUFFER, posBuffer);
+        gl.bufferData(gl.ARRAY_BUFFER, new Float32Array([-1,1, 1,1, -1,-1, 1,-1]), gl.STATIC_DRAW);
+
+        const posAttrib = gl.getAttribLocation(program, "aVertexPosition");
+        gl.enableVertexAttribArray(posAttrib);
+        gl.vertexAttribPointer(posAttrib, 2, gl.FLOAT, false, 0, 0);
+
+        const texture = gl.createTexture();
+        gl.bindTexture(gl.TEXTURE_2D, texture);
+        gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
+        gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
+        gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR);
+
+        const uCols = gl.getUniformLocation(program, "uCols");
+        const uRows = gl.getUniformLocation(program, "uRows");
+        const uMode = gl.getUniformLocation(program, "uColorMode");
+
+        function draw() {
+            canvas.width = window.innerWidth;
+            canvas.height = window.innerHeight;
+            gl.viewport(0, 0, canvas.width, canvas.height);
+
+            gl.bindTexture(gl.TEXTURE_2D, texture);
+            gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, gl.RGBA, gl.UNSIGNED_BYTE, video);
+            
+            gl.uniform1f(uCols, COLS);
+            gl.uniform1f(uRows, ROWS);
+            gl.uniform1i(uMode, colorMode);
+
+            gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
+            requestAnimationFrame(draw);
+        }
+
+        document.getElementById('flipBtn').onclick = () => {
+            facingMode = facingMode === "environment" ? "user" : "environment";
+            startCamera();
+        };
+
+        document.getElementById('modeBtn').onclick = () => {
+            colorMode = (colorMode + 1) % modes.length;
+            document.getElementById('modeBtn').innerText = modes[colorMode];
+        };
+
+        startCamera().then(() => requestAnimationFrame(draw));
+    </script>
+</body>
+</html>
