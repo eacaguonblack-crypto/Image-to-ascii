@@ -1,34 +1,14 @@
-
 <!DOCTYPE html>
 <html lang="en">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>ASCII Selfie Cam</title>
+    <title>FINAL ASCII PRO</title>
     <style>
-        body { margin: 0; background: #000; overflow: hidden; display: flex; justify-content: center; align-items: center; height: 100vh; font-family: monospace; }
-        canvas { width: 100vw; height: 100vh; object-fit: contain; }
-        
-        .ui {
-            position: fixed;
-            bottom: 20px;
-            background: rgba(0, 0, 0, 0.8);
-            padding: 15px;
-            border-radius: 15px;
-            display: flex;
-            flex-direction: column;
-            gap: 10px;
-            border: 1px solid #333;
-            width: 250px;
-        }
-
-        button { 
-            background: #fff; border: none; padding: 12px; border-radius: 8px; 
-            font-weight: bold; cursor: pointer; text-transform: uppercase;
-        }
-
-        #snap { background: #0f0; }
-        label { color: #0f0; font-size: 10px; text-align: center; }
+        body { margin: 0; background: #000; overflow: hidden; display: flex; flex-direction: column; align-items: center; justify-content: center; height: 100vh; }
+        canvas { width: 100vw; height: 100vh; object-fit: cover; background: #000; }
+        .controls { position: fixed; bottom: 30px; z-index: 100; display: flex; gap: 10px; }
+        button { background: rgba(40, 40, 40, 0.9); color: #fff; border: 1px solid #666; padding: 15px 20px; border-radius: 30px; font-family: monospace; font-size: 14px; font-weight: bold; }
         video { display: none; }
     </style>
 </head>
@@ -37,100 +17,105 @@
     <canvas id="output"></canvas>
     <video id="video" autoplay playsinline muted></video>
 
-    <div class="ui">
-        <label id="density-label">RESOLUTION: 80</label>
-        <input type="range" id="density-slider" min="30" max="120" value="80">
-        <button id="flip">🔄 FLIP CAMERA</button>
-        <button id="snap">📸 TAKE SELFIE</button>
+    <div class="controls">
+        <button id="flip">SWITCH CAM</button>
+        <button id="color">MODE: FULL</button>
     </div>
 
     <script>
         const video = document.getElementById('video');
         const canvas = document.getElementById('output');
         const ctx = canvas.getContext('2d', { alpha: false });
-        const densitySlider = document.getElementById('density-slider');
+
+        // --- Optimized High Density ---
+        const COLS = 150; // High density but safer for mobile CPUs
+        const ROWS = 120; // Maintain rectangular 4:3-ish aspect
+        const CHARS = "$@B%8&WM#*oahkbdpqwmZO0QLCJUYXzcvunxrjft/\\|()1{}[]?-_+~<>i!lI;:,\"^`'. ";
         
-        // Hidden processing canvas
-        const offscreen = document.createElement('canvas');
-        const oCtx = offscreen.getContext('2d', { willReadFrequently: true });
+        let facingMode = "environment";
+        let colorMode = 0; // 0: Full, 1: Green, 2: Blue, 3: Gray
+        const modes = ["FULL", "GREEN", "BLUE", "GRAY"];
 
-        const CHARS = "@#S%?*+;:,. ";
-        let currentCols = 80;
-        let facingMode = "user"; 
-
-        async function initCamera() {
+        async function start() {
             if (window.stream) window.stream.getTracks().forEach(t => t.stop());
-            const s = await navigator.mediaDevices.getUserMedia({
-                video: { facingMode: facingMode }
-            });
-            window.stream = s;
-            video.srcObject = s;
+            try {
+                const s = await navigator.mediaDevices.getUserMedia({
+                    video: { facingMode: facingMode, width: 640, height: 480 }
+                });
+                window.stream = s;
+                video.srcObject = s;
+                video.play();
+            } catch (e) {
+                alert("Please use HTTPS and allow camera access.");
+            }
         }
 
         function render() {
             if (video.readyState === video.HAVE_ENOUGH_DATA) {
-                const w = window.innerWidth;
-                const h = window.innerHeight;
-                if (canvas.width !== w) { canvas.width = w; canvas.height = h; }
+                // Adjust internal canvas to match screen resolution
+                canvas.width = window.innerWidth;
+                canvas.height = window.innerHeight;
 
-                const COLS = currentCols;
-                const ROWS = Math.floor(COLS * (h / w));
-                const cellW = w / COLS;
-                const cellH = h / ROWS;
+                const cellW = canvas.width / COLS;
+                const cellH = canvas.height / ROWS;
 
+                // Hidden tiny canvas for data sampling
+                const offscreen = document.createElement('canvas');
                 offscreen.width = COLS;
                 offscreen.height = ROWS;
-
-                // Draw video to tiny offscreen canvas
-                oCtx.save();
+                const oCtx = offscreen.getContext('2d');
+                
+                // Draw flipped for front cam
                 if (facingMode === "user") {
                     oCtx.translate(COLS, 0);
                     oCtx.scale(-1, 1);
                 }
                 oCtx.drawImage(video, 0, 0, COLS, ROWS);
-                oCtx.restore();
+                const pixels = oCtx.getImageData(0, 0, COLS, ROWS).data;
 
-                const data = oCtx.getImageData(0, 0, COLS, ROWS).data;
-
-                ctx.fillStyle = "#000";
-                ctx.fillRect(0, 0, w, h);
-                ctx.font = `bold ${cellH}px monospace`;
+                // Clear background
+                ctx.fillStyle = "black";
+                ctx.fillRect(0, 0, canvas.width, canvas.height);
+                
+                // Font setup
+                ctx.font = `${cellH}px monospace`;
+                ctx.textAlign = "center";
 
                 for (let y = 0; y < ROWS; y++) {
                     for (let x = 0; x < COLS; x++) {
                         const i = (y * COLS + x) * 4;
-                        const r = data[i], g = data[i+1], b = data[i+2];
-                        const avg = (r + g + b) / 3;
+                        const r = pixels[i];
+                        const g = pixels[i+1];
+                        const b = pixels[i+2];
+                        const brightness = (r + g + b) / 3;
                         
-                        const char = CHARS[Math.floor((avg / 255) * (CHARS.length - 1))];
+                        const char = CHARS[Math.floor((brightness / 256) * CHARS.length)];
 
-                        ctx.fillStyle = `rgb(${r},${g},${b})`;
-                        ctx.fillText(char, x * cellW, y * cellH + cellH);
+                        // Apply color filter
+                        if (colorMode === 0) ctx.fillStyle = `rgb(${r},${g},${b})`;
+                        else if (colorMode === 1) ctx.fillStyle = `rgb(0,${brightness},0)`;
+                        else if (colorMode === 2) ctx.fillStyle = `rgb(0,${brightness/2},${brightness})`;
+                        else ctx.fillStyle = `rgb(${brightness},${brightness},${brightness})`;
+
+                        ctx.fillText(char, x * cellW + cellW/2, y * cellH + cellH);
                     }
                 }
             }
             requestAnimationFrame(render);
         }
 
-        densitySlider.oninput = (e) => {
-            currentCols = parseInt(e.target.value);
-            document.getElementById('density-label').innerText = `RESOLUTION: ${currentCols}`;
-        };
-
         document.getElementById('flip').onclick = () => {
-            facingMode = facingMode === "user" ? "environment" : "user";
-            initCamera();
+            facingMode = facingMode === "environment" ? "user" : "environment";
+            start();
         };
 
-        document.getElementById('snap').onclick = () => {
-            const link = document.createElement('a');
-            link.download = 'ascii-selfie.png';
-            link.href = canvas.toDataURL();
-            link.click();
+        document.getElementById('color').onclick = () => {
+            colorMode = (colorMode + 1) % modes.length;
+            document.getElementById('color').innerText = "MODE: " + modes[colorMode];
         };
 
-        initCamera();
-        requestAnimationFrame(render);
+        start().then(() => requestAnimationFrame(render));
     </script>
 </body>
 </html>
+
