@@ -1,51 +1,44 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-<meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-<title>ULTRA ASCII SMOOTH — FIXED</title>
-
-<style>
-body {
-    margin: 0;
-    background: #000;
-    overflow: hidden;
-    display: flex;
-    justify-content: center;
-    align-items: center;
-    height: 100vh;
-}
-
-#output {
-    font-family: "Courier New", monospace;
-    font-weight: bold;
-    white-space: pre;
-    line-height: 1;
-}
-
-.ui {
-    position: fixed;
-    bottom: 30px;
-    z-index: 10;
-}
-
-button {
-    background: rgba(0,255,0,.25);
-    color: #0f0;
-    border: 1px solid #0f0;
-    padding: 14px 22px;
-    border-radius: 50px;
-    font-family: monospace;
-    font-size: 16px;
-}
-
-video { display: none; }
-</style>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>ULTRA ASCII SMOOTH — FIXED</title>
+    <style>
+        body {
+            margin: 0;
+            background: #000;
+            overflow: hidden;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            height: 100vh;
+        }
+        /* We use a canvas for the display instead of a <pre> tag */
+        canvas#display {
+            display: block;
+        }
+        .ui {
+            position: fixed;
+            bottom: 30px;
+            z-index: 10;
+        }
+        button {
+            background: rgba(0,255,0,.25);
+            color: #0f0;
+            border: 1px solid #0f0;
+            padding: 14px 22px;
+            border-radius: 50px;
+            font-family: monospace;
+            font-size: 16px;
+            cursor: pointer;
+        }
+        video { display: none; }
+    </style>
 </head>
-
 <body>
 
-<pre id="output"></pre>
+<canvas id="display"></canvas>
 <video id="video" autoplay playsinline muted></video>
 
 <div class="ui">
@@ -54,67 +47,73 @@ video { display: none; }
 
 <script>
 const video = document.getElementById("video");
-const output = document.getElementById("output");
+const displayCanvas = document.getElementById("display");
+const displayCtx = displayCanvas.getContext("2d", { alpha: false });
 
-const COLS = 160;               // higher = slower
-const CHAR_ASPECT = 0.55;       // correct ASCII proportions
-const ROWS = Math.floor(COLS * CHAR_ASPECT);
-
+// Configuration
+const COLS = 120; // Adjusted for better performance on mobile
+const CHAR_ASPECT = 1.6; // Vertical spacing multiplier
 const CHARS = " .:-=+*#%@";
 
 let facingMode = "environment";
-
-const canvas = document.createElement("canvas");
-canvas.width = COLS;
-canvas.height = ROWS;
-const ctx = canvas.getContext("2d", { alpha: false });
+const hiddenCanvas = document.createElement("canvas");
+const hiddenCtx = hiddenCanvas.getContext("2d", { alpha: false });
 
 async function initCamera() {
     if (window.stream) {
         window.stream.getTracks().forEach(t => t.stop());
     }
-
-    const stream = await navigator.mediaDevices.getUserMedia({
-        video: { facingMode }
-    });
-
-    window.stream = stream;
-    video.srcObject = stream;
+    try {
+        const stream = await navigator.mediaDevices.getUserMedia({
+            video: { facingMode }
+        });
+        window.stream = stream;
+        video.srcObject = stream;
+    } catch (err) {
+        console.error("Camera error:", err);
+    }
 }
 
 function render() {
     if (video.readyState === video.HAVE_ENOUGH_DATA) {
-        ctx.drawImage(video, 0, 0, COLS, ROWS);
-        const data = ctx.getImageData(0, 0, COLS, ROWS).data;
+        const w = video.videoWidth;
+        const h = video.videoHeight;
+        const rows = Math.floor(COLS * (h / w) * 0.5); // Adjust rows based on aspect ratio
 
-        let out = "";
-        let p = 0;
+        hiddenCanvas.width = COLS;
+        hiddenCanvas.height = rows;
+        hiddenCtx.drawImage(video, 0, 0, COLS, rows);
 
-        for (let y = 0; y < ROWS; y++) {
+        const imageData = hiddenCtx.getImageData(0, 0, COLS, rows);
+        const data = imageData.data;
+
+        // Prepare Display Canvas
+        const fontSize = window.innerWidth / COLS;
+        displayCanvas.width = window.innerWidth;
+        displayCanvas.height = rows * fontSize * CHAR_ASPECT;
+        
+        displayCtx.fillStyle = "#000";
+        displayCtx.fillRect(0, 0, displayCanvas.width, displayCanvas.height);
+        displayCtx.font = `bold ${fontSize}px monospace`;
+        displayCtx.textAlign = "left";
+
+        for (let y = 0; y < rows; y++) {
             for (let x = 0; x < COLS; x++) {
-                const r = data[p++];
-                const g = data[p++];
-                const b = data[p++];
-                p++; // alpha
+                const p = (y * COLS + x) * 4;
+                const r = data[p];
+                const g = data[p + 1];
+                const b = data[p + 2];
 
-                const lum = (r + g + b) / 3;
-                const c = CHARS[(lum / 255 * (CHARS.length - 1)) | 0];
+                const lum = (r * 0.299 + g * 0.587 + b * 0.114); // Better luminance formula
+                const charIndex = Math.floor((lum / 255) * (CHARS.length - 1));
+                const char = CHARS[charIndex];
 
-                out += `<span style="color:rgb(${r},${g},${b})">${c}</span>`;
+                displayCtx.fillStyle = `rgb(${r},${g},${b})`;
+                displayCtx.fillText(char, x * fontSize, y * fontSize * CHAR_ASPECT);
             }
-            out += "\n";
         }
-
-        output.innerHTML = out;
     }
-
     requestAnimationFrame(render);
-}
-
-function resize() {
-    const size = window.innerWidth / COLS * 1.7;
-    output.style.fontSize = size + "px";
-    output.style.lineHeight = size + "px";
 }
 
 document.getElementById("toggle").onclick = () => {
@@ -122,10 +121,7 @@ document.getElementById("toggle").onclick = () => {
     initCamera();
 };
 
-window.addEventListener("resize", resize);
-
 video.onloadedmetadata = () => {
-    resize();
     render();
 };
 
@@ -133,3 +129,4 @@ initCamera();
 </script>
 </body>
 </html>
+
