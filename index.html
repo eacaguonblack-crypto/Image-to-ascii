@@ -1,4 +1,3 @@
-
 <!DOCTYPE html>
 <html lang="en">
 <head>
@@ -8,28 +7,12 @@
     <style>
         body { margin: 0; background: #000; overflow: hidden; display: flex; flex-direction: column; align-items: center; justify-content: center; height: 100vh; font-family: monospace; }
         canvas { width: 100vw; height: 100vh; object-fit: contain; background: #000; }
-        
-        .ui {
-            position: fixed;
-            bottom: 30px;
-            display: flex;
-            gap: 15px;
-            z-index: 10;
-        }
-
+        .ui { position: fixed; bottom: 30px; display: flex; gap: 15px; z-index: 10; }
         button { 
-            background: rgba(255, 255, 255, 0.2);
-            color: white;
-            border: 1px solid rgba(255, 255, 255, 0.4);
-            padding: 15px 25px;
-            border-radius: 50px;
-            font-weight: bold;
-            backdrop-filter: blur(5px);
-            cursor: pointer;
-            text-transform: uppercase;
-            font-size: 14px;
+            background: rgba(255, 255, 255, 0.2); color: white; border: 1px solid rgba(255, 255, 255, 0.4);
+            padding: 15px 25px; border-radius: 50px; font-weight: bold; backdrop-filter: blur(5px);
+            cursor: pointer; text-transform: uppercase; font-size: 14px;
         }
-
         #snap { background: #00ff00; color: #000; border: none; }
         video { display: none; }
     </style>
@@ -48,23 +31,37 @@
         const video = document.getElementById('video');
         const canvas = document.getElementById('output');
         const ctx = canvas.getContext('2d', { alpha: false });
-        
         const offscreen = document.createElement('canvas');
         const oCtx = offscreen.getContext('2d', { willReadFrequently: true });
 
         const CHARS = "@#W$9876543210?!abc;:+=-,.  ";
-        const COLS = 80; // Fixed pixel density for stability
+        const COLS = 80; 
         let facingMode = "user"; 
 
         async function initCamera() {
-            if (window.stream) window.stream.getTracks().forEach(t => t.stop());
+            if (window.stream) {
+                window.stream.getTracks().forEach(t => t.stop());
+            }
+            
+            const constraints = {
+                video: { 
+                    facingMode: facingMode,
+                    width: { ideal: 640 },
+                    height: { ideal: 480 }
+                },
+                audio: false
+            };
+
             try {
-                const s = await navigator.mediaDevices.getUserMedia({
-                    video: { facingMode: facingMode }
-                });
+                const s = await navigator.mediaDevices.getUserMedia(constraints);
                 window.stream = s;
                 video.srcObject = s;
-            } catch (e) { alert("Camera Error"); }
+                // Important: Wait for video to load metadata
+                video.onloadedmetadata = () => video.play();
+            } catch (e) {
+                console.error(e);
+                alert("CAMERA ERROR: " + e.message + "\n\nMake sure you are using HTTPS and have granted camera permissions.");
+            }
         }
 
         function render() {
@@ -89,7 +86,7 @@
                 oCtx.drawImage(video, 0, 0, COLS, ROWS);
                 oCtx.restore();
 
-                const data = oCtx.getImageData(0, 0, COLS, ROWS).data;
+                const imgData = oCtx.getImageData(0, 0, COLS, ROWS).data;
 
                 ctx.fillStyle = "#000";
                 ctx.fillRect(0, 0, canvas.width, canvas.height);
@@ -98,11 +95,9 @@
                 for (let y = 0; y < ROWS; y++) {
                     for (let x = 0; x < COLS; x++) {
                         const i = (y * COLS + x) * 4;
-                        const r = data[i], g = data[i+1], b = data[i+2];
+                        const r = imgData[i], g = imgData[i+1], b = imgData[i+2];
                         const brightness = (r + g + b) / 3;
-                        
-                        const charIdx = Math.floor((brightness / 256) * CHARS.length);
-                        const char = CHARS[charIdx];
+                        const char = CHARS[Math.floor((brightness / 256) * CHARS.length)];
 
                         ctx.fillStyle = `rgb(${r},${g},${b})`;
                         ctx.fillText(char, x * cellW, y * cellH + cellH);
@@ -119,9 +114,9 @@
 
         document.getElementById('snap').onclick = () => {
             const now = new Date();
-            const timestamp = `${now.getFullYear()}-${now.getMonth()+1}-${now.getDate()}_${now.getHours()}-${now.getMinutes()}`;
+            const ts = `${now.getFullYear()}-${now.getMonth()+1}-${now.getDate()}_${now.getHours()}-${now.getMinutes()}`;
             const link = document.createElement('a');
-            link.download = `ASCII-PIC-${timestamp}.png`;
+            link.download = `ASCII-PIC-${ts}.png`;
             link.href = canvas.toDataURL('image/png');
             link.click();
         };
@@ -131,3 +126,4 @@
     </script>
 </body>
 </html>
+
