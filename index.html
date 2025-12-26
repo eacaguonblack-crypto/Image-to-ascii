@@ -1,14 +1,44 @@
+
 <!DOCTYPE html>
 <html lang="en">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>ASCII PRO 400x300</title>
+    <title>Dynamic ASCII Slider</title>
     <style>
-        body { margin: 0; background: #000; overflow: hidden; display: flex; flex-direction: column; align-items: center; justify-content: center; height: 100vh; }
-        canvas { width: 100vw; height: auto; background: #000; }
-        .controls { position: fixed; bottom: 20px; z-index: 10; background: rgba(0,0,0,0.8); padding: 15px; border-radius: 50px; }
-        button { background: #333; color: #0f0; border: 1px solid #0f0; padding: 10px 20px; border-radius: 20px; font-family: monospace; font-weight: bold; }
+        body { margin: 0; background: #000; overflow: hidden; display: flex; flex-direction: column; align-items: center; justify-content: center; height: 100vh; font-family: sans-serif; }
+        canvas { width: 100vw; height: 100vh; object-fit: cover; background: #000; }
+        
+        .ui-container {
+            position: fixed;
+            bottom: 30px;
+            z-index: 100;
+            background: rgba(0, 0, 0, 0.85);
+            padding: 20px;
+            border-radius: 20px;
+            width: 80%;
+            max-width: 400px;
+            display: flex;
+            flex-direction: column;
+            gap: 15px;
+            backdrop-filter: blur(10px);
+            border: 1px solid #444;
+        }
+
+        .slider-box { display: flex; flex-direction: column; color: #fff; font-size: 12px; gap: 8px; }
+        input[type=range] { width: 100%; accent-color: #0f0; }
+
+        .btn-row { display: flex; gap: 10px; }
+        button { 
+            flex: 1;
+            background: #222; 
+            color: #fff; 
+            border: 1px solid #555; 
+            padding: 10px; 
+            border-radius: 10px; 
+            font-size: 12px;
+            text-transform: uppercase;
+        }
         video { display: none; }
     </style>
 </head>
@@ -17,97 +47,112 @@
     <canvas id="output"></canvas>
     <video id="video" autoplay playsinline muted></video>
 
-    <div class="controls">
-        <button id="toggle">FLIP CAMERA</button>
+    <div class="ui-container">
+        <div class="slider-box">
+            <label id="density-label">PIXEL DENSITY: 150</label>
+            <input type="range" id="density-slider" min="20" max="300" value="150">
+        </div>
+        <div class="btn-row">
+            <button id="flip">🔄 ROTATE</button>
+            <button id="color">MODE: FULL</button>
+        </div>
     </div>
 
     <script>
         const video = document.getElementById('video');
         const canvas = document.getElementById('output');
         const ctx = canvas.getContext('2d', { alpha: false });
+        const densitySlider = document.getElementById('density-slider');
+        const densityLabel = document.getElementById('density-label');
 
-        // Your requested 400x300 Rectangular Resolution
-        const COLS = 400; 
-        const ROWS = 300;
         const CHARS = "$@B%8&WM#*oahkbdpqwmZO0QLCJUYXzcvunxrjft/\\|()1{}[]?-_+~<>i!lI;:,\"^`'. ";
         
-        let facingMode = "environment"; // Starts with BACK camera
+        let currentCols = parseInt(densitySlider.value);
+        let facingMode = "environment"; 
+        let colorMode = 0; 
+        const modes = ["FULL", "GREEN", "BLUE", "GRAY"];
 
-        async function setupCamera() {
+        async function startCamera() {
             if (window.stream) {
                 window.stream.getTracks().forEach(track => track.stop());
             }
-
-            const constraints = {
-                video: { 
-                    facingMode: facingMode,
-                    width: { ideal: 640 },
-                    height: { ideal: 480 }
-                }
-            };
-
+            await new Promise(r => setTimeout(r, 200));
             try {
-                const stream = await navigator.mediaDevices.getUserMedia(constraints);
-                window.stream = stream;
-                video.srcObject = stream;
-            } catch (e) {
-                alert("Please allow camera access and ensure you are using HTTPS.");
-            }
+                const s = await navigator.mediaDevices.getUserMedia({
+                    video: { facingMode: facingMode, width: { ideal: 640 } }
+                });
+                window.stream = s;
+                video.srcObject = s;
+                video.play();
+            } catch (e) { alert("Camera Error"); }
         }
 
         function render() {
             if (video.readyState === video.HAVE_ENOUGH_DATA) {
-                // Set canvas size for the text grid
-                const charW = 10;
-                const charH = 12;
-                canvas.width = COLS * charW;
-                canvas.height = ROWS * charH;
+                canvas.width = window.innerWidth;
+                canvas.height = window.innerHeight;
 
-                // Create a temporary canvas to get image data
-                const tempCanvas = document.createElement('canvas');
-                tempCanvas.width = COLS;
-                tempCanvas.height = ROWS;
-                const tempCtx = tempCanvas.getContext('2d');
+                const COLS = currentCols;
+                const ROWS = Math.floor(COLS * (canvas.height / canvas.width));
+                const cellW = canvas.width / COLS;
+                const cellH = canvas.height / ROWS;
+
+                // Offscreen processing
+                const off = document.createElement('canvas');
+                off.width = COLS;
+                off.height = ROWS;
+                const oCtx = off.getContext('2d');
                 
-                // Draw video to temp canvas
-                tempCtx.drawImage(video, 0, 0, COLS, ROWS);
-                const data = tempCtx.getImageData(0, 0, COLS, ROWS).data;
+                if (facingMode === "user") {
+                    oCtx.translate(COLS, 0);
+                    oCtx.scale(-1, 1);
+                }
+                oCtx.drawImage(video, 0, 0, COLS, ROWS);
+                const pixels = oCtx.getImageData(0, 0, COLS, ROWS).data;
 
-                // Clear main canvas
                 ctx.fillStyle = "black";
                 ctx.fillRect(0, 0, canvas.width, canvas.height);
-                ctx.font = `${charH}px monospace`;
+                ctx.font = `${cellH}px monospace`;
+                ctx.textAlign = "center";
 
                 for (let y = 0; y < ROWS; y++) {
                     for (let x = 0; x < COLS; x++) {
                         const i = (y * COLS + x) * 4;
-                        const r = data[i];
-                        const g = data[i+1];
-                        const b = data[i+2];
-
-                        const brightness = (r + g + b) / 3;
-                        const charIdx = Math.floor((brightness / 255) * (CHARS.length - 1));
+                        const r = pixels[i], g = pixels[i+1], b = pixels[i+2];
+                        const brightness = (0.21 * r + 0.72 * g + 0.07 * b);
+                        
+                        const charIdx = Math.floor((brightness / 256) * CHARS.length);
                         const char = CHARS[charIdx];
 
-                        ctx.fillStyle = `rgb(${r},${g},${b})`;
-                        ctx.fillText(char, x * charW, y * charH);
+                        if (colorMode === 0) ctx.fillStyle = `rgb(${r},${g},${b})`;
+                        else if (colorMode === 1) ctx.fillStyle = `rgb(0,${brightness},0)`;
+                        else if (colorMode === 2) ctx.fillStyle = `rgb(0,${brightness/2},${brightness})`;
+                        else ctx.fillStyle = `rgb(${brightness},${brightness},${brightness})`;
+
+                        ctx.fillText(char, x * cellW + cellW/2, y * cellH + cellH);
                     }
                 }
             }
             requestAnimationFrame(render);
         }
 
-        document.getElementById('toggle').onclick = () => {
-            facingMode = facingMode === "user" ? "environment" : "user";
-            setupCamera();
+        // Real-time slider update
+        densitySlider.addEventListener('input', (e) => {
+            currentCols = parseInt(e.target.value);
+            densityLabel.innerText = `PIXEL DENSITY: ${currentCols}`;
+        });
+
+        document.getElementById('flip').onclick = async () => {
+            facingMode = (facingMode === "user") ? "environment" : "user";
+            await startCamera();
         };
 
-        video.onloadedmetadata = () => {
-            render();
+        document.getElementById('color').onclick = () => {
+            colorMode = (colorMode + 1) % modes.length;
+            document.getElementById('color').innerText = "MODE: " + modes[colorMode];
         };
 
-        setupCamera();
+        startCamera().then(() => requestAnimationFrame(render));
     </script>
 </body>
 </html>
-
